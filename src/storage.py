@@ -63,8 +63,9 @@ images: {images}
     def _generate_filepath(self, post: Dict) -> Path:
         """Generate filepath using URL hash for uniqueness"""
         timestamp = int(datetime.fromisoformat(post['published_at'].replace('+08:00', '')).timestamp())
-        # Use URL hash to ensure unique filenames
-        url_hash = hashlib.md5(post.get('url', post['id']).encode()).hexdigest()[:8]
+        # Use source_url or id for hash to ensure unique filenames
+        url = post.get('source_url') or post.get('url') or post['id']
+        url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
         safe_title = re.sub(r'[^\w\s\u4e00-\u9fff]', '', post['title'])[:50]
         filename = f"{timestamp}_{url_hash}_{safe_title}.md"
         return self.output_dir / filename
