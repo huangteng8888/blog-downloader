@@ -1,0 +1,16 @@
+# 博主配置
+bloggers:
+  - uid: "1300871220"
+    name: "徐小明"
+    enabled: true
+    schedule:
+      enabled: false
+      interval: "daily"
+      time: "02:00"
+    filters:
+      categories: []
+      exclude_categories: []
+    storage:
+      format: "markdown"
+      include_images: true
+      image_dir: "images"
