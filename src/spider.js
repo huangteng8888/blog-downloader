@@ -87,31 +87,23 @@ class SinaSpider {
             .map(a => ({ title: a.textContent.trim(), url: a.href }));
         });
       } else {
-        articles = await this.page.evaluate(async (params) => {
-          const { pageNum, uid } = params;
-          try {
-            const resp = await fetch(`/s/article_sort_${uid}_10001_${pageNum}.html`, {
-              headers: { 'Accept': 'text/html', 'X-Requested-With': 'XMLHttpRequest' }
-            });
-            const text = await resp.text();
-            const seen = new Set();
-            const matches = text.match(/href="(\/\/blog\.sina\.com\.cn\/s\/blog_[^"]+)"/g) || [];
-            return matches
-              .map(m => {
-                const url = m.match(/href="([^"]+)"/)[1].replace('//blog.', 'https://blog.');
-                return url;
-              })
-              .filter(url => {
-                if (seen.has(url)) return false;
-                seen.add(url);
-                return true;
-              })
-              .map(url => ({ title: '', url: url }));
-          } catch (e) {
-            console.error('Fetch error:', e.message);
-            return [];
-          }
-        }, { pageNum: page, uid: this.uid });
+        // Use Sina's AJAX pagination via Ui.Pagination.showPage
+        await this.page.evaluate((pageNum) => {
+          Ui.Pagination.showPage('pagination_10001', pageNum);
+        }, page);
+        await this.page.waitForTimeout(3000);
+
+        articles = await this.page.evaluate(() => {
+          const seen = new Set();
+          return Array.from(document.querySelectorAll('a'))
+            .filter(a => a.href.includes('/s/blog_') && !a.href.includes('comment'))
+            .filter(a => {
+              if (seen.has(a.href)) return false;
+              seen.add(a.href);
+              return true;
+            })
+            .map(a => ({ title: a.textContent.trim(), url: a.href }));
+        });
       }
 
       console.log(`Page ${page}: ${articles.length} articles`);
