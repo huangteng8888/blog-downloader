@@ -62,11 +62,18 @@ BlogGraphBuilder 构建包含：
 - **节点**：post（文章）、author（作者）、keyword（关键词）
 - **边**：shares_tag（共享标签）、next_post（时间相邻）、wrote（写作关系）、contains_keyword（包含关键词）
 
+## 元数据层
+
+BlogMetadata 三层架构：
+1. **blogger.json** - 博主个人信息
+2. **download.json** - 下载会话统计
+3. **posts/index.json** - 所有文章索引（快速检索）
+
 ## 已知限制
 
 1. **分页**：Sina博客分页使用JS渲染，当前版本仅支持获取首页列表
 2. **反爬**：使用curl+Cookie绕过418，新浪可能随时调整策略
-3. **图片**：文章内图片为新浪CDN链接，建议本地化存储
+3. **图片本地化**：暂未实现，建议后续添加
 
 ## 测试
 
