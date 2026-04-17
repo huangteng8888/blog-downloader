@@ -91,7 +91,8 @@ class SinaSpider {
         await this.page.evaluate((pageNum) => {
           Ui.Pagination.showPage('pagination_10001', pageNum);
         }, page);
-        await this.page.waitForTimeout(3000);
+        await this.page.waitForTimeout(5000);
+        await this.page.waitForLoadState('networkidle');
 
         articles = await this.page.evaluate(() => {
           const seen = new Set();
