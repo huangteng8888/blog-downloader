@@ -77,7 +77,7 @@ def main():
 
         # Generate statistics
         stats = metadata.generate_statistics()
-        print(f"Statistics: {stats['total_posts']} posts, {stats['total_words']} words, {stats['total_images']} images")
+        print(f"Statistics: {stats['total_posts']} posts, {stats['total_images']} images")
         print(f"Date range: {stats['date_range']['earliest']} ~ {stats['date_range']['latest']}")
 
 

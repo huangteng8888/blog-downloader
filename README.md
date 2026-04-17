@@ -48,7 +48,6 @@ author_name: 徐小明
 published_at: 2026-04-14 16:38:44
 tags: ["徐小明", "交易师", "股票"]
 source_url: https://blog.sina.com.cn/s/blog_4d89b8340103028h.html
-word_count: 534
 ---
 
 # 文章标题

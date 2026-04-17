@@ -19,7 +19,6 @@ fetched_at: {fetched_at}
 type: {post_type}
 category: {category}
 tags: {tags}
-word_count: {word_count}
 source_url: {source_url}
 likes: {likes}
 comments: {comments}
@@ -49,7 +48,6 @@ images: {images}
             post_type=post.get('type', 'article'),
             category=post.get('category', ''),
             tags=json.dumps(post.get('tags', []), ensure_ascii=False),
-            word_count=len(content),
             source_url=post['source_url'],
             likes=post.get('likes', 0),
             comments=post.get('comments', 0),
@@ -76,7 +74,6 @@ images: {images}
             'title': p['title'],
             'published_at': p['published_at'],
             'category': p.get('category', ''),
-            'word_count': p.get('word_count', 0),
             'filename': str(self._generate_filepath(p).relative_to(self.output_dir))
         } for p in posts]
         

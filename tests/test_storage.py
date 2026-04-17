@@ -49,8 +49,8 @@ def test_save_index():
         storage = BlogStorage(Path(tmpdir))
         blogger = {'uid': '1300871220', 'name': '徐小明'}
         posts = [
-            {'id': 'p1', 'title': '文章1', 'published_at': '2024-12-21', 'word_count': 100},
-            {'id': 'p2', 'title': '文章2', 'published_at': '2024-12-22', 'word_count': 200},
+            {'id': 'p1', 'title': '文章1', 'published_at': '2024-12-21'},
+            {'id': 'p2', 'title': '文章2', 'published_at': '2024-12-22'},
         ]
         storage.save_index(blogger, posts)
         index_path = storage.output_dir / 'index.json'

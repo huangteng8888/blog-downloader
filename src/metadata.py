@@ -64,21 +64,19 @@ class BlogMetadata:
             'pages_completed': 0,
             'last_page': 0,
             'last_article_index': -1,
-            'total_words': 0,
             'total_images': 0,
             'failed_urls': [],
         }
         self._save_download()
 
     def update_progress(self, page: int, article_index: int, downloaded: int,
-                       words: int = 0, images: int = 0):
+                       images: int = 0):
         """Update download progress"""
         if hasattr(self, 'download_info'):
             self.download_info['last_page'] = page
             self.download_info['last_article_index'] = article_index
             self.download_info['total_downloaded'] = downloaded
             self.download_info['pages_completed'] = page
-            self.download_info['total_words'] += words
             self.download_info['total_images'] += images
             self._save_download()
 
@@ -133,9 +131,7 @@ class BlogMetadata:
             'title': post['title'],
             'published_at': post['published_at'],
             'published_date': post['published_at'][:10] if post.get('published_at') else '',
-            'category': post.get('category', ''),
             'tags': post.get('tags', []),
-            'word_count': post.get('word_count', 0),
             'images_count': len(post.get('images', [])),
             'filename': post.get('filename', ''),
             'source_url': post.get('source_url', ''),
@@ -158,7 +154,6 @@ class BlogMetadata:
         if not self.posts_index:
             self.init_index()
 
-        words = [p['word_count'] for p in self.posts_index]
         tags = [t for p in self.posts_index for t in p.get('tags', [])]
         dates = [p['published_date'] for p in self.posts_index if p.get('published_date')]
 
@@ -166,8 +161,6 @@ class BlogMetadata:
 
         return {
             'total_posts': len(self.posts_index),
-            'total_words': sum(words),
-            'avg_words': sum(words) // len(words) if words else 0,
             'total_images': sum(p['images_count'] for p in self.posts_index),
             'date_range': {
                 'earliest': min(dates) if dates else None,
@@ -210,7 +203,6 @@ fetched_at: {fetched_at}
 type: {post_type}
 category: {category}
 tags: {tags}
-word_count: {word_count}
 source_url: {source_url}
 likes: {likes}
 comments: {comments}
@@ -239,7 +231,6 @@ keywords: {keywords}
             post_type=kwargs.get('type', 'article'),
             category=kwargs.get('category', ''),
             tags=json.dumps(kwargs.get('tags', []), ensure_ascii=False),
-            word_count=len(content),
             source_url=kwargs.get('source_url', ''),
             likes=kwargs.get('likes', 0),
             comments=kwargs.get('comments', 0),

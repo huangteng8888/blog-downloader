@@ -57,7 +57,6 @@ class BlogGraphBuilder:
             'published_at': fm.get('published_at', ''),
             'category': fm.get('category', ''),
             'tags': self._parse_tags(fm.get('tags', '[]')),
-            'word_count': int(fm.get('word_count', 0)),
             'content': text,
             'source_url': fm.get('source_url', ''),
             'filename': str(md_file)
@@ -80,8 +79,7 @@ class BlogGraphBuilder:
             author=post['author'],
             published_at=post['published_at'],
             category=post['category'],
-            tags=post['tags'],
-            word_count=post['word_count']
+            tags=post['tags']
         )
         
         keywords = self._extract_keywords(post['content'])
