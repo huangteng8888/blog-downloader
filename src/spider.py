@@ -129,8 +129,8 @@ class SinaSpider:
             # Extract images
             images = re.findall(r'<img[^>]+src="([^"]+)"', html)
 
-            # Extract article ID
-            article_id_match = re.search(r'blog_([0-9a-f]+)', url)
+            # Extract article ID (includes hex suffix like 'o', 'n', etc.)
+            article_id_match = re.search(r'blog_([0-9a-z]+)', url)
             article_id = article_id_match.group(1) if article_id_match else ''
 
             # Extract tags
