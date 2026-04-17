@@ -60,12 +60,11 @@ images: {images}
         return filepath
     
     def _generate_filepath(self, post: Dict) -> Path:
-        """Generate semantic filepath: {date}/{timestamp}_{id}_{title}.md"""
-        date = post['published_at'][:10]  # YYYY-MM-DD
+        """Generate filepath: {id}_{safe_title}.md (flat structure)"""
         timestamp = int(datetime.fromisoformat(post['published_at'].replace('+08:00', '')).timestamp())
-        safe_title = re.sub(r'[^\w\s\u4e00-\u9fff]', '', post['title'])[:30]
+        safe_title = re.sub(r'[^\w\s\u4e00-\u9fff]', '', post['title'])[:50]
         filename = f"{timestamp}_{post['id']}_{safe_title}.md"
-        return self.output_dir / date / filename
+        return self.output_dir / filename
     
     def save_index(self, blogger: Dict, posts: List[Dict]):
         """Save index.json for fast retrieval"""

@@ -38,7 +38,7 @@ cat output/1300871220/knowledge_graph.json
 
 ## 输出格式
 
-每篇文章：`{date}/{timestamp}_{id}_{title}.md`
+每篇文章：`{timestamp}_{id}_{safe_title}.md`（扁平结构）
 
 ```yaml
 ---
