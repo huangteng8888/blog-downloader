@@ -39,6 +39,7 @@ class BlogMetadata:
             },
             'created_at': datetime.now().isoformat(),
         }
+        self.output_dir.mkdir(parents=True, exist_ok=True)
         self.blogger_file.write_text(json.dumps(info, indent=2, ensure_ascii=False))
 
     def load_blogger_info(self) -> Optional[Dict]:
@@ -114,11 +115,14 @@ class BlogMetadata:
     # ============ Layer 3: Post Index ============
 
     def init_index(self):
-        """Initialize empty post index"""
+        """Initialize empty post index or load existing"""
         self.posts_index = []
         if self.index_file.exists():
-            data = json.loads(self.index_file.read_text())
-            self.posts_index = data.get('posts', [])
+            try:
+                data = json.loads(self.index_file.read_text())
+                self.posts_index = data.get('posts', [])
+            except:
+                pass
         else:
             self._save_index()
 
