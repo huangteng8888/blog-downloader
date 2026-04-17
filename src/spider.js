@@ -1,9 +1,12 @@
 /**
  * Sina Blog Spider - Optimized with checkpoint/resume
  */
-const { chromium } = require('playwright');
+const { chromium } = require('playwright-core');
 const fs = require('fs');
 const path = require('path');
+
+// Use existing playwright browsers
+const PLAYWRIGHT_BROWSERS_PATH = process.env.PLAYWRIGHT_BROWSERS_PATH || '/home/ht/.cache/ms-playwright';
 
 class SinaSpider {
   constructor(uid, outputDir = '/tmp/sina_download') {
@@ -18,7 +21,10 @@ class SinaSpider {
 
   async initBrowser() {
     if (!this.browser) {
-      this.browser = await chromium.launch({ headless: true });
+      this.browser = await chromium.launch({
+        headless: true,
+        executablePath: PLAYWRIGHT_BROWSERS_PATH + '/chromium-1208/chrome-linux64/chrome'
+      });
       this.context = await this.browser.newContext({
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
       });
@@ -126,7 +132,10 @@ class SinaSpider {
   }
 
   async getArticleContent(url) {
-    const browser = await chromium.launch({ headless: true });
+    const browser = await chromium.launch({
+      headless: true,
+      executablePath: PLAYWRIGHT_BROWSERS_PATH + '/chromium-1208/chrome-linux64/chrome'
+    });
     const context = await browser.newContext({
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
     });
