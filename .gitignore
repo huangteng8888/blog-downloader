@@ -1,0 +1,12 @@
+node_modules/
+*.pyc
+__pycache__/
+*.log
+.download.*
+.env
+output/
+.cache/
+temp_*.html
+/tmp/
+.DS_Store
+*.swp

@@ -10,6 +10,7 @@ from pathlib import Path
 from spider import SinaSpider
 from storage import BlogStorage
 from blog_graph import BlogGraphBuilder
+from metadata import BlogMetadata
 
 
 def load_bloggers(config_path: Path) -> list:
@@ -36,8 +37,16 @@ def main():
         print(f"Processing: {blogger['name']} ({blogger['uid']})")
 
         output_dir = Path(args.output) / blogger['uid']
-        spider = SinaSpider(blogger['uid'], output_dir=str(output_dir / 'posts'))
-        storage = BlogStorage(output_dir / 'posts')
+        posts_dir = output_dir / 'posts'
+
+        # Initialize metadata layer
+        metadata = BlogMetadata(output_dir)
+        metadata.save_blogger_info(blogger)
+        metadata.init_download_session(blogger['uid'])
+        metadata.init_index()
+
+        spider = SinaSpider(blogger['uid'], output_dir=str(posts_dir))
+        storage = BlogStorage(posts_dir)
 
         total_saved = 0
         for article in spider.iter_articles(max_pages=args.max_pages, delay=args.delay, resume=not args.no_resume):
@@ -50,18 +59,26 @@ def main():
                 'title': article['title'],
                 'tags': article['tags'],
             }
-            storage.save_post(post, article['content'], article['images'])
+            filepath = storage.save_post(post, article['content'], article['images'])
+            post['filename'] = str(filepath.relative_to(posts_dir))
+
+            # Update metadata
+            metadata.add_post(post)
             total_saved += 1
             print(f"  [{spider.load_checkpoint()['downloaded']}] {article['title'][:50]}")
 
         # Build knowledge graph
-        posts_dir = output_dir / 'posts'
         if posts_dir.exists():
             builder = BlogGraphBuilder()
             builder.load_from_markdown(posts_dir)
             builder.export_json(output_dir / 'knowledge_graph.json')
             print(f"\nCompleted: {total_saved} articles saved")
             print(f"Knowledge graph: {builder.graph.number_of_nodes()} nodes, {builder.graph.number_of_edges()} edges")
+
+        # Generate statistics
+        stats = metadata.generate_statistics()
+        print(f"Statistics: {stats['total_posts']} posts, {stats['total_words']} words, {stats['total_images']} images")
+        print(f"Date range: {stats['date_range']['earliest']} ~ {stats['date_range']['latest']}")
 
 
 if __name__ == '__main__':
