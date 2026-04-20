@@ -1,250 +1,99 @@
 /**
- * Sina Blog Spider - Optimized with checkpoint/resume
+ * Sina Blog Spider - Uses articlelist pages (static HTML, 50 articles/page)
+ * URL pattern: https://blog.sina.com.cn/s/articlelist_{uid}_0_{page}.html
  */
 const { chromium } = require('playwright-core');
-const fs = require('fs');
-const path = require('path');
-
-// Use existing playwright browsers
 const PLAYWRIGHT_BROWSERS_PATH = process.env.PLAYWRIGHT_BROWSERS_PATH || '/home/ht/.cache/ms-playwright';
 
-class SinaSpider {
-  constructor(uid, outputDir = '/tmp/sina_download') {
-    this.uid = uid;
-    this.blogUrl = `https://blog.sina.com.cn/s/articlelist_${uid}`;
-    this.outputDir = outputDir;
-    this.checkpointFile = path.join(outputDir, `.checkpoint_${uid}.json`);
-    this.browser = null;
-    this.context = null;
-    this.page = null;
-  }
+async function getArticleList(uid, page = 1) {
+  const browser = await chromium.launch({
+    headless: true,
+    executablePath: PLAYWRIGHT_BROWSERS_PATH + '/chromium-1208/chrome-linux64/chrome'
+  });
+  const context = await browser.newContext({
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+  });
+  const pageObj = await context.newPage();
 
-  async initBrowser() {
-    if (!this.browser) {
-      this.browser = await chromium.launch({
-        headless: true,
-        executablePath: PLAYWRIGHT_BROWSERS_PATH + '/chromium-1208/chrome-linux64/chrome'
-      });
-      this.context = await this.browser.newContext({
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-      });
-      this.page = await this.context.newPage();
-      await this.page.goto(`https://blog.sina.com.cn/u/${this.uid}`, {
-        waitUntil: 'domcontentloaded',
-        timeout: 15000
-      });
-      await this.page.waitForTimeout(2000);
-    }
-  }
+  try {
+    // Articlelist URL: category 0 = all, page numbered
+    const url = `https://blog.sina.com.cn/s/articlelist_${uid}_0_${page}.html`;
 
-  loadCheckpoint() {
-    try {
-      if (fs.existsSync(this.checkpointFile)) {
-        const data = JSON.parse(fs.readFileSync(this.checkpointFile, 'utf8'));
-        console.log(`Checkpoint loaded: page ${data.lastPage}, downloaded ${data.downloaded} articles`);
-        return data;
-      }
-    } catch (e) {
-      console.error('Failed to load checkpoint:', e.message);
-    }
-    return { lastPage: 1, lastArticleIndex: -1, downloaded: 0, failedUrls: [] };
-  }
-
-  saveCheckpoint(data) {
-    try {
-      fs.writeFileSync(this.checkpointFile, JSON.stringify(data, null, 2));
-    } catch (e) {
-      console.error('Failed to save checkpoint:', e.message);
-    }
-  }
-
-  markFailed(url, error) {
-    try {
-      const checkpoint = this.loadCheckpoint();
-      if (!checkpoint.failedUrls.includes(url)) {
-        checkpoint.failedUrls.push({ url, error: error.message, time: new Date().toISOString() });
-        this.saveCheckpoint(checkpoint);
-      }
-    } catch (e) {}
-  }
-
-  async getArticleList(page = 1) {
-    await this.initBrowser();
-
-    try {
-      let articles;
-
-      if (page === 1) {
-        articles = await this.page.evaluate(() => {
-          const seen = new Set();
-          return Array.from(document.querySelectorAll('a'))
-            .filter(a => a.href.includes('/s/blog_') && !a.href.includes('comment'))
-            .filter(a => {
-              if (seen.has(a.href)) return false;
-              seen.add(a.href);
-              return true;
-            })
-            .map(a => ({ title: a.textContent.trim(), url: a.href }));
-        });
-      } else {
-        // Use Sina's AJAX pagination via Ui.Pagination.showPage
-        await this.page.evaluate((pageNum) => {
-          Ui.Pagination.showPage('pagination_10001', pageNum);
-        }, page);
-        await this.page.waitForTimeout(5000);
-        await this.page.waitForLoadState('networkidle');
-
-        articles = await this.page.evaluate(() => {
-          const seen = new Set();
-          return Array.from(document.querySelectorAll('a'))
-            .filter(a => a.href.includes('/s/blog_') && !a.href.includes('comment'))
-            .filter(a => {
-              if (seen.has(a.href)) return false;
-              seen.add(a.href);
-              return true;
-            })
-            .map(a => ({ title: a.textContent.trim(), url: a.href }));
-        });
-      }
-
-      console.log(`Page ${page}: ${articles.length} articles`);
-      return articles;
-    } catch (error) {
-      console.error(`Error getting page ${page}:`, error.message);
-      return [];
-    }
-  }
-
-  async close() {
-    if (this.browser) {
-      await this.browser.close();
-      this.browser = null;
-      this.context = null;
-      this.page = null;
-    }
-  }
-
-  async getArticleContent(url) {
-    const browser = await chromium.launch({
-      headless: true,
-      executablePath: PLAYWRIGHT_BROWSERS_PATH + '/chromium-1208/chrome-linux64/chrome'
+    await pageObj.goto(url, {
+      waitUntil: 'domcontentloaded',
+      timeout: 30000
     });
-    const context = await browser.newContext({
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-    });
-    const page = await context.newPage();
+    await pageObj.waitForTimeout(2000); // Wait for any JS
 
-    try {
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
-      await page.waitForTimeout(2000);
+    const articles = await pageObj.evaluate(() => {
+      const seen = new Set();
+      const results = [];
 
-      const data = await page.evaluate(() => {
-        const titleEl = document.querySelector('h2.titName') || document.querySelector('h1');
-        const title = titleEl ? titleEl.textContent.trim() : '';
-
-        const timeEl = document.querySelector('.time');
-        const date = timeEl ? timeEl.textContent.trim() : '';
-
-        const contentEl = document.querySelector('.articalContent') || document.querySelector('.article-content');
-        const content = contentEl ? contentEl.textContent.trim() : '';
-
-        const tagEls = document.querySelectorAll('.blog_tag h3, .articalTag h3');
-        const tags = Array.from(tagEls).map(t => t.textContent.trim()).filter(t => t);
-
-        const imgs = Array.from(document.querySelectorAll('.articalContent img'))
-          .map(img => img.src);
-
-        return { title, content, date, tags, images: imgs };
-      });
-
-      await browser.close();
-      return { ...data, url };
-    } catch (error) {
-      await browser.close();
-      throw error;
-    }
-  }
-
-  async *download(maxPages = 100, delayMs = 1500, resume = true) {
-    const checkpoint = resume ? this.loadCheckpoint() : { lastPage: 1, lastArticleIndex: -1, downloaded: 0, failedUrls: [] };
-
-    if (resume && checkpoint.downloaded > 0) {
-      console.log(`Resuming from page ${checkpoint.lastPage}, article ${checkpoint.lastArticleIndex + 1}`);
-    }
-
-    try {
-      for (let page = checkpoint.lastPage; page <= maxPages; page++) {
-        const articles = await this.getArticleList(page);
-        if (!articles || articles.length === 0) {
-          console.log(`No more articles at page ${page}`);
-          break;
-        }
-
-        const startIndex = page === checkpoint.lastPage ? checkpoint.lastArticleIndex + 1 : 0;
-
-        for (let i = startIndex; i < articles.length; i++) {
-          const article = articles[i];
-
-          // Skip if already in failed URLs list
-          if (checkpoint.failedUrls.some(f => f.url === article.url)) {
-            console.log(`Skipping failed URL: ${article.url}`);
-            continue;
-          }
-
-          try {
-            const detail = await this.getArticleContent(article.url);
-            const result = { ...article, ...detail };
-
-            // Save checkpoint after each successful download
-            this.saveCheckpoint({
-              lastPage: page,
-              lastArticleIndex: i,
-              downloaded: checkpoint.downloaded + 1,
-              failedUrls: checkpoint.failedUrls
-            });
-
-            yield result;
-            await new Promise(r => setTimeout(r, delayMs));
-          } catch (e) {
-            console.error(`Error fetching ${article.url}: ${e.message}`);
-            this.markFailed(article.url, e);
+      // Find all article links in the page
+      document.querySelectorAll('a').forEach(a => {
+        const href = a.href;
+        // Match blog article URLs: /s/blog_ARTICLEID.html or full URL
+        if (href.includes('/s/blog_') && !href.includes('comment') && !href.includes('#')) {
+          const match = href.match(/blog_([0-9a-z]+)\.html/);
+          if (match && !seen.has(match[1])) {
+            seen.add(match[1]);
+            const title = a.textContent.trim();
+            // Skip navigation links and empty titles
+            if (title && title.length > 3 && !title.includes('...')) {
+              results.push({ title, url: href });
+            }
           }
         }
-      }
-    } finally {
-      await this.close();
-    }
+      });
+
+      return results;
+    });
+
+    console.log(`Page ${page}: ${articles.length} articles`);
+    return articles;
+  } catch (error) {
+    console.error(`Error page ${page}:`, error.message);
+    return [];
+  } finally {
+    await browser.close();
   }
 }
 
-module.exports = { SinaSpider };
+module.exports = { getArticleList };
 
 // CLI
 if (require.main === module) {
   const args = process.argv.slice(2);
   const uid = args.find(a => a.startsWith('--uid='))?.split('=')[1] || '1300871220';
-  const outputDir = args.find(a => a.startsWith('--output='))?.split('=')[1] || '/tmp/sina_download';
-  const maxPages = parseInt(args.find(a => a.startsWith('--max-pages='))?.split('=')[1] || '10');
-  const delay = parseInt(args.find(a => a.startsWith('--delay='))?.split('=')[1] || '1500');
-  const resume = !args.includes('--no-resume');
+  const pageArg = args.find(a => a.startsWith('--page='));
+  const page = pageArg ? parseInt(pageArg.split('=')[1]) : null;
   const listOnly = args.includes('--list-only');
-  const testPages = args.find(a => a.startsWith('--test-pages='))?.split('=')[1] || '1';
+  const testPages = parseInt(args.find(a => a.startsWith('--test-pages='))?.split('=')[1] || '0');
 
   (async () => {
-    const spider = new SinaSpider(uid, outputDir);
-
-    if (listOnly) {
-      const articles = await spider.getArticleList(parseInt(testPages));
-      console.log(JSON.stringify(articles));
-    } else {
-      // Test pagination
-      for (let p = 1; p <= parseInt(testPages); p++) {
-        const articles = await spider.getArticleList(p);
-        console.log(`Page ${p}: ${articles.length} articles`);
+    // Single page mode (for programmatic use via spider.py)
+    if (page !== null) {
+      const articles = await getArticleList(uid, page);
+      if (listOnly) {
+        console.log(JSON.stringify(articles));
+      } else {
+        console.log(`Page ${page} first URL:`, articles[0]?.url);
       }
     }
-
-    await spider.close();
+    // Test mode (for manual testing)
+    else if (testPages > 0) {
+      for (let p = 1; p <= testPages; p++) {
+        const articles = await getArticleList(uid, p);
+        console.log(`Page ${p} first URL:`, articles[0]?.url);
+      }
+    }
+    // Default: test 3 pages
+    else {
+      for (let p = 1; p <= 3; p++) {
+        const articles = await getArticleList(uid, p);
+        console.log(`Page ${p} first URL:`, articles[0]?.url);
+      }
+    }
     process.exit(0);
   })();
 }

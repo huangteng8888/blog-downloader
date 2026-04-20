@@ -7,7 +7,7 @@ import logging
 import yaml
 from pathlib import Path
 
-from spider import SinaSpider
+from spider_fast import SinaSpider
 from storage import BlogStorage
 from blog_graph import BlogGraphBuilder
 from metadata import BlogMetadata
@@ -23,7 +23,8 @@ def main():
     parser.add_argument('--config', default=Path(__file__).parent.parent / 'config/bloggers.yaml')
     parser.add_argument('--uid', help='Specific blogger UID')
     parser.add_argument('--max-pages', type=int, default=100)
-    parser.add_argument('--delay', type=float, default=1.5)
+    parser.add_argument('--delay', type=float, default=0.1)
+    parser.add_argument('--concurrent', type=int, default=5, help='Concurrent downloads')
     parser.add_argument('--no-resume', action='store_true', help='Start fresh without resuming')
     parser.add_argument('--output', default='output', help='Output directory')
     args = parser.parse_args()
@@ -49,7 +50,8 @@ def main():
         storage = BlogStorage(posts_dir)
 
         total_saved = 0
-        for article in spider.iter_articles(max_pages=args.max_pages, delay=args.delay, resume=not args.no_resume):
+        for article in spider.iter_articles(max_pages=args.max_pages, delay=args.delay,
+                                            resume=not args.no_resume, concurrent=args.concurrent):
             post = {
                 'id': article['id'],
                 'author_uid': blogger['uid'],

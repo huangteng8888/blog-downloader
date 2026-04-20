@@ -1,63 +1,50 @@
 """
-Sina Blog spider - optimized with checkpoint/resume
-Uses Node.js spider.js for list pages, curl for article content
+Sina Blog spider - optimized with concurrent downloading and batch checkpoint
+Uses Python requests for article content, Node.js for article list
 """
 import re
 import json
 import time
 import logging
-import subprocess
+import requests
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional, Iterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from queue import Queue
+import threading
 
 logger = logging.getLogger(__name__)
 
+# Thread-local session for connection pooling
+thread_local = threading.local()
+
+def get_session():
+    """Get or create thread-local requests session"""
+    if not hasattr(thread_local, 'session'):
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            'Accept-Language': 'zh-CN,zh;q=0.9',
+            'Referer': 'https://blog.sina.com.cn/',
+        })
+        thread_local.session = session
+    return thread_local.session
+
 
 class SinaSpider:
-    """Sina blog spider with checkpoint/resume support"""
+    """Sina blog spider with checkpoint/resume and concurrent downloading"""
+
+    # Batch size for checkpoint saves
+    CHECKPOINT_BATCH = 10
 
     def __init__(self, uid: str, output_dir: str = None):
         self.uid = uid
         self.output_dir = Path(output_dir) if output_dir else Path('/tmp/sina_download')
-        self.cookie_file = f'/tmp/sina_cookies_{uid}.txt'
         self.checkpoint_file = self.output_dir / f'.checkpoint_{uid}.json'
-        self._init_cookies()
-
-    def _init_cookies(self):
-        """Fetch blog homepage to get cookies"""
-        try:
-            cmd = f'curl -s -c {self.cookie_file} -o /dev/null -H "User-Agent: Mozilla/5.0" "https://blog.sina.com.cn/u/{self.uid}"'
-            subprocess.run(cmd, shell=True, timeout=10)
-        except Exception as e:
-            logger.warning(f'Cookie init failed: {e}')
-
-    def _curl(self, url: str) -> tuple:
-        """Execute curl and return (status_code, content)"""
-        import tempfile
-        output_file = tempfile.mktemp(suffix='.html')
-        cmd = [
-            'curl', '-s', '-L',
-            '-o', output_file,
-            '-w', '%{http_code}',
-            '-b', self.cookie_file,
-            '-c', self.cookie_file,
-            '-H', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-            '-H', 'Accept-Language: zh-CN,zh;q=0.9',
-            '-H', 'Referer: https://blog.sina.com.cn/',
-            url
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        status = result.stdout.strip()
-        content = ''
-        try:
-            with open(output_file, 'r', encoding='utf-8') as f:
-                content = f.read()
-        except:
-            pass
-        Path(output_file).unlink(missing_ok=True)
-        return status, content
+        self._checkpoint_lock = threading.Lock()
+        self._pending_checkpoint = None
+        self._last_save_time = 0
 
     def load_checkpoint(self) -> Dict:
         """Load checkpoint data"""
@@ -70,13 +57,21 @@ class SinaSpider:
             logger.warning(f'Checkpoint load failed: {e}')
         return {'lastPage': 1, 'lastArticleIndex': -1, 'downloaded': 0, 'failedUrls': []}
 
-    def save_checkpoint(self, data: Dict):
-        """Save checkpoint data"""
-        try:
-            self.checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
-            self.checkpoint_file.write_text(json.dumps(data, indent=2))
-        except Exception as e:
-            logger.error(f'Checkpoint save failed: {e}')
+    def save_checkpoint(self, data: Dict, immediate: bool = False):
+        """Save checkpoint data (batched for performance)"""
+        now = time.time()
+        with self._checkpoint_lock:
+            # Always update pending data
+            self._pending_checkpoint = data
+
+            # Save immediately if forced or enough time passed
+            if immediate or (now - self._last_save_time) > 5:
+                try:
+                    self.checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
+                    self.checkpoint_file.write_text(json.dumps(data, indent=2))
+                    self._last_save_time = now
+                except Exception as e:
+                    logger.error(f'Checkpoint save failed: {e}')
 
     def mark_failed(self, url: str, error: str):
         """Mark URL as failed"""
@@ -88,18 +83,25 @@ class SinaSpider:
                     'error': error,
                     'time': datetime.now().isoformat()
                 })
-                self.save_checkpoint(checkpoint)
+                self.save_checkpoint(checkpoint, immediate=True)
         except:
             pass
 
-    def fetch_article(self, article_url: str) -> str:
-        """Fetch article page"""
-        status, content = self._curl(article_url)
-        if status != '200':
-            logger.warning(f'Fetch returned {status}, re-initing cookies')
-            self._init_cookies()
-            status, content = self._curl(article_url)
-        return content
+    def fetch_article(self, article_url: str) -> Optional[str]:
+        """Fetch article page using requests (connection pooled)"""
+        try:
+            session = get_session()
+            response = session.get(article_url, timeout=30, allow_redirects=True)
+            if response.status_code == 200:
+                return response.text
+            elif response.status_code == 404:
+                return None
+            else:
+                logger.warning(f'Fetch returned {response.status_code}')
+                return None
+        except Exception as e:
+            logger.error(f'Fetch error for {article_url}: {e}')
+            return None
 
     def parse_article(self, html: str, url: str) -> Optional[Dict]:
         """Parse article from HTML"""
@@ -152,8 +154,9 @@ class SinaSpider:
 
     def _get_article_list_via_node(self, page: int = 1) -> List[Dict]:
         """Get article list using node/spider.js"""
+        import subprocess
         spider_js = Path(__file__).parent / 'spider.js'
-        cmd = ['node', str(spider_js), '--uid', self.uid, '--page', str(page), '--list-only']
+        cmd = ['node', str(spider_js), f'--uid={self.uid}', f'--page={page}', '--list-only']
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
             if result.returncode == 0 and result.stdout:
@@ -165,12 +168,20 @@ class SinaSpider:
             logger.error(f'Node spider failed: {e}')
         return []
 
-    def iter_articles(self, max_pages: int = 100, delay: float = 1.5, resume: bool = True) -> Iterator[Dict]:
+    def _fetch_and_parse(self, url: str) -> Optional[Dict]:
+        """Fetch and parse single article"""
+        html = self.fetch_article(url)
+        if html:
+            return self.parse_article(html, url)
+        return None
+
+    def iter_articles(self, max_pages: int = 100, delay: float = 0.1, resume: bool = True,
+                      concurrent: int = 5) -> Iterator[Dict]:
         """
-        Iterate all articles with checkpoint/resume support.
-        Respects Sina's pagination: page 1 has ~10 articles, subsequent pages via AJAX.
+        Iterate all articles with checkpoint/resume and concurrent downloading.
         """
         checkpoint = self.load_checkpoint() if resume else {'lastPage': 1, 'lastArticleIndex': -1, 'downloaded': 0, 'failedUrls': []}
+        articles_since_checkpoint = 0
 
         for page in range(checkpoint['lastPage'], max_pages + 1):
             try:
@@ -182,36 +193,48 @@ class SinaSpider:
                 logger.info(f'Page {page}: {len(articles)} articles')
 
                 start_index = page == checkpoint['lastPage'] and checkpoint['lastArticleIndex'] + 1 or 0
+                page_articles = articles[start_index:]
 
-                for i in range(start_index, len(articles)):
-                    article = articles[i]
-                    url = article['url']
+                if not page_articles:
+                    continue
 
-                    # Skip failed URLs
-                    if any(f['url'] == url for f in checkpoint.get('failedUrls', [])):
-                        logger.info(f'Skipping previously failed: {url}')
-                        continue
+                # Concurrent fetching for this page's articles
+                with ThreadPoolExecutor(max_workers=min(concurrent, len(page_articles))) as executor:
+                    future_to_idx = {
+                        executor.submit(self._fetch_and_parse, art['url']): (i + start_index, art['url'])
+                        for i, art in enumerate(page_articles)
+                    }
 
-                    try:
-                        html = self.fetch_article(url)
-                        if html:
-                            parsed = self.parse_article(html, url)
+                    for future in as_completed(future_to_idx):
+                        idx, url = future_to_idx[future]
+                        try:
+                            parsed = future.result()
                             if parsed:
-                                # Update checkpoint
-                                checkpoint = {
-                                    'lastPage': page,
-                                    'lastArticleIndex': i,
-                                    'downloaded': checkpoint['downloaded'] + 1,
-                                    'failedUrls': checkpoint.get('failedUrls', [])
-                                }
-                                self.save_checkpoint(checkpoint)
+                                checkpoint['downloaded'] += 1
+                                checkpoint['lastPage'] = page
+                                checkpoint['lastArticleIndex'] = idx
+                                articles_since_checkpoint += 1
                                 yield parsed
 
-                        time.sleep(delay)
-                    except Exception as e:
-                        logger.error(f'Error fetching {url}: {e}')
-                        self.mark_failed(url, str(e))
+                                # Batch checkpoint saves
+                                if articles_since_checkpoint >= self.CHECKPOINT_BATCH:
+                                    self.save_checkpoint(checkpoint)
+                                    articles_since_checkpoint = 0
+
+                        except Exception as e:
+                            logger.error(f'Error processing {url}: {e}')
+                            self.mark_failed(url, str(e))
+
+                # Save checkpoint after each page
+                self.save_checkpoint(checkpoint)
+
+                # Small delay between pages
+                if delay > 0:
+                    time.sleep(delay)
 
             except Exception as e:
                 logger.error(f'Page {page} error: {e}')
                 break
+
+        # Final checkpoint save
+        self.save_checkpoint(checkpoint, immediate=True)
