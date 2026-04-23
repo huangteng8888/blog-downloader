@@ -5,15 +5,44 @@
 import os
 import json
 import time
+import re
 from pathlib import Path
 from collections import defaultdict
+
+def retry_with_backoff(func, *args, **kwargs):
+    """指数退避重试装饰器/函数，专门处理 529 overloaded_error"""
+    import anthropic
+    last_exception = None
+    for attempt in range(RETRY_MAX):
+        try:
+            return func(*args, **kwargs)
+        except anthropic.APIError as e:
+            last_exception = e
+            if getattr(e, 'status', None) == 529 or '529' in str(e):
+                delay = RETRY_DELAYS[attempt] if attempt < len(RETRY_DELAYS) else RETRY_DELAYS[-1]
+                print(f"  收到 529 错误 (尝试 {attempt+1}/{RETRY_MAX}), {delay}秒后重试...")
+                time.sleep(delay)
+            else:
+                raise
+        except Exception as e:
+            last_exception = e
+            raise
+    raise last_exception
+
+def clean_json_string(s: str) -> str:
+    """移除 JSON 字符串中的控制字符（保留 tab/newline/cr）"""
+    # 移除 \x00-\x1f 除了 \t(\x09), \n(\x0a), \r(\x0d)
+    return re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', s)
 
 POSTS_DIR = Path("/mnt/data/blog-downloader/1300871220/posts")
 OUTPUT_DIR = Path("/mnt/data/blog-downloader/1300871220/blog-graph")
 CLAUDE_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 MODEL = "claude-sonnet-4-7-20250514"
 BATCH_SIZE = 10
-MAX_TOKENS = 4096
+MAX_TOKENS=32000
+RETRY_MAX = 5
+RETRY_DELAYS = [2, 4, 8, 16, 32]
+JSON_RETRY_MAX = 2
 
 def get_articles_batch(paths: list[Path]) -> list[dict]:
     articles = []
@@ -57,7 +86,7 @@ def extract_text(response) -> str:
             return block.text
     return ""
 
-def analyze_batch(articles: list[dict]) -> str:
+def _do_analyze_batch(articles: list[dict]) -> str:
     import anthropic
     client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
 
@@ -89,13 +118,16 @@ def analyze_batch(articles: list[dict]) -> str:
 
 idx 必须与输入文章的编号对应（1-10）。只返回 JSON 数组，不要有任何其他文字。"""
 
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=MAX_TOKENS,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    return extract_text(response)
+
+def analyze_batch(articles: list[dict]) -> str:
     try:
-        response = client.messages.create(
-            model=MODEL,
-            max_tokens=MAX_TOKENS,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        return extract_text(response)
+        return retry_with_backoff(_do_analyze_batch, articles)
     except Exception as e:
         print(f"Error: {e}")
         return "[]"
@@ -142,43 +174,69 @@ def main():
             start_idx = i
             break
 
-    for i in range(start_idx, total, BATCH_SIZE):
+    failed_batches = 0
+    i = start_idx
+    batch_num = i // BATCH_SIZE + 1
+    while i < total:
         batch = post_files[i:i+BATCH_SIZE]
         articles = get_articles_batch(batch)
 
-        print(f"处理批次 {i//BATCH_SIZE + 1}: 文章 {i+1}-{min(i+BATCH_SIZE, total)}", flush=True)
+        print(f"处理批次 {batch_num}: 文章 {i+1}-{min(i+BATCH_SIZE, total)}", flush=True)
 
         result_text = analyze_batch(articles)
 
-        try:
-            if result_text.startswith('```json'):
-                result_text = result_text[7:]
-            if result_text.startswith('```'):
-                result_text = result_text[3:]
-            if result_text.endswith('```'):
-                result_text = result_text[:-3]
+        # 检测 529 错误导致返回空结果，进行重试
+        batch_retry_count = 0
+        while result_text == "[]" and batch_retry_count < 3:
+            batch_retry_count += 1
+            delay = RETRY_DELAYS[batch_retry_count - 1] if batch_retry_count <= len(RETRY_DELAYS) else RETRY_DELAYS[-1]
+            print(f"  检测到 529 错误相关失败 (批次重试 {batch_retry_count}/3), {delay}秒后重试此批次...")
+            time.sleep(delay)
+            result_text = analyze_batch(articles)
 
-            results = json.loads(result_text.strip())
-            # 使用 LLM 返回的 idx 精确对应文章
-            for r in results:
-                idx = r.get('idx', 1) - 1  # idx 是 1-10，转换为 0-9
-                if 0 <= idx < len(articles):
-                    r['_source_file'] = articles[idx]['file']
-                    r['_author'] = articles[idx]['author']
-                    r['_published_at'] = articles[idx]['published_at']
-                all_results.append(r)
-            print(f"  成功解析 {len(results)} 篇")
-        except json.JSONDecodeError as e:
-            print(f"  JSON 解析错误: {e}")
-            print(f"  响应前200字符: {result_text[:200]}")
+        parsed_ok = False
+        for json_attempt in range(JSON_RETRY_MAX + 1):
+            try:
+                if result_text.startswith('```json'):
+                    result_text = result_text[7:]
+                if result_text.startswith('```'):
+                    result_text = result_text[3:]
+                if result_text.endswith('```'):
+                    result_text = result_text[:-3]
 
-        time.sleep(1)
+                cleaned = clean_json_string(result_text.strip())
+                results = json.loads(cleaned)
+                # 使用 LLM 返回的 idx 精确对应文章
+                for r in results:
+                    idx = r.get('idx', 1) - 1  # idx 是 1-10，转换为 0-9
+                    if 0 <= idx < len(articles):
+                        r['_source_file'] = articles[idx]['file']
+                        r['_author'] = articles[idx]['author']
+                        r['_published_at'] = articles[idx]['published_at']
+                    all_results.append(r)
+                print(f"  成功解析 {len(results)} 篇")
+                parsed_ok = True
+                break
+            except json.JSONDecodeError as e:
+                if json_attempt < JSON_RETRY_MAX:
+                    print(f"  JSON 解析错误 (尝试 {json_attempt+2}/{JSON_RETRY_MAX+1}): {e}")
+                    print(f"  清理控制字符后重试...")
+                    result_text = clean_json_string(result_text)
+                else:
+                    print(f"  JSON 解析错误: {e}")
+                    print(f"  响应前200字符: {result_text[:200]}")
+                    failed_batches += 1
+
+        time.sleep(5)
 
         # 每10批保存一次，防止中断丢失数据
-        if (i // BATCH_SIZE + 1) % 10 == 0:
+        if batch_num % 10 == 0:
             with open(OUTPUT_DIR / "analysis_results.json", 'w', encoding='utf-8') as f:
                 json.dump(all_results, f, ensure_ascii=False, indent=2)
             print(f"  [自动保存] 已保存 {len(all_results)} 篇")
+
+        i += BATCH_SIZE
+        batch_num += 1
 
     # 保存结果
     output_file = OUTPUT_DIR / "analysis_results.json"
@@ -192,6 +250,8 @@ def main():
 
     print(f"\n=== 分析完成 ===")
     print(f"共分析了 {len(all_results)} 篇文章")
+    if failed_batches > 0:
+        print(f"失败批次数: {failed_batches}")
     print(f"结果保存到: {output_file}")
     if topics:
         print(f"\n热门主题 (Top 10):")
