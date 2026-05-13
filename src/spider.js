@@ -8,12 +8,17 @@ const PLAYWRIGHT_BROWSERS_PATH = process.env.PLAYWRIGHT_BROWSERS_PATH || '/home/
 async function getArticleList(uid, page = 1) {
   const browser = await chromium.launch({
     headless: true,
-    executablePath: PLAYWRIGHT_BROWSERS_PATH + '/chromium-1208/chrome-linux64/chrome'
+    executablePath: PLAYWRIGHT_BROWSERS_PATH + '/chromium-1208/chrome-linux64/chrome',
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
   });
   const context = await browser.newContext({
     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
   });
   const pageObj = await context.newPage();
+  await pageObj.setExtraHTTPHeaders({
+    'Referer': 'https://blog.sina.com.cn/',
+    'Accept-Language': 'zh-CN,zh;q=0.9',
+  });
 
   try {
     // Articlelist URL: category 0 = all, page numbered
@@ -21,9 +26,9 @@ async function getArticleList(uid, page = 1) {
 
     await pageObj.goto(url, {
       waitUntil: 'domcontentloaded',
-      timeout: 30000
+      timeout: 45000
     });
-    await pageObj.waitForTimeout(2000); // Wait for any JS
+    await pageObj.waitForTimeout(3000); // Wait for any JS
 
     const articles = await pageObj.evaluate(() => {
       const seen = new Set();
