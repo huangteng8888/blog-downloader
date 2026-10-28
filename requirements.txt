@@ -1,0 +1,10 @@
+# Python 依赖（建议 Python 3.10+）
+# 安装：python -m pip install -r requirements.txt
+
+jieba>=0.42.1      # 中文分词 + TF-IDF 关键词发现（keyword_analyzer.py）
+networkx>=3.0      # 知识图谱构建（src/blog_graph.py）
+
+# 说明：
+# - 网页抓取列表页依赖 Node.js 侧 Playwright（见 package.json / src/spider.js）
+#   npm install playwright && npx playwright install chromium
+# - 文章详情抓取依赖系统 curl（Windows 10 1803+ 自带）

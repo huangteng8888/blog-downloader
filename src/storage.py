@@ -1,81 +1,40 @@
 """
-Markdown storage with Graphify-compatible frontmatter
+Markdown storage - minimal frontmatter
+Only article_id in frontmatter, all other metadata in index.json
 """
-import json
 import re
-import hashlib
 from pathlib import Path
-from datetime import datetime
-from typing import List, Dict, Optional
+from typing import List, Dict
+
 
 class BlogStorage:
-    """Graphify-compatible blog storage"""
-    
-    FRONTMATTER_TEMPLATE = """---
-id: {id}
-author_uid: {author_uid}
-author_name: {author_name}
-published_at: {published_at}
-fetched_at: {fetched_at}
-type: {post_type}
-category: {category}
-tags: {tags}
-source_url: {source_url}
-likes: {likes}
-comments: {comments}
-images_count: {images_count}
-images: {images}
----
+    """Minimal blog storage - frontmatter only contains article_id"""
 
-# {title}
+    FRONTMATTER_TEMPLATE = """---
+article_id: {article_id}
+---
 
 {content}
 """
 
     def __init__(self, output_dir: Path):
         self.output_dir = Path(output_dir)
-    
-    def save_post(self, post: Dict, content: str, images: List[str]) -> Path:
-        """Save post as Graphify-compatible Markdown"""
+
+    def save_post(self, post: Dict, content: str, **kwargs) -> Path:
+        """Save post with minimal frontmatter"""
         filepath = self._generate_filepath(post)
         filepath.parent.mkdir(parents=True, exist_ok=True)
-        
+
         markdown = self.FRONTMATTER_TEMPLATE.format(
-            id=post['id'],
-            author_uid=post['author_uid'],
-            author_name=post['author_name'],
-            published_at=post['published_at'],
-            fetched_at=datetime.now().isoformat(),
-            post_type=post.get('type', 'article'),
-            category=post.get('category', ''),
-            tags=json.dumps(post.get('tags', []), ensure_ascii=False),
-            source_url=post['source_url'],
-            likes=post.get('likes', 0),
-            comments=post.get('comments', 0),
-            images_count=len(images),
-            images=json.dumps(images, ensure_ascii=False),
-            title=post['title'],
+            article_id=post.get('article_id', ''),
             content=content
         )
         filepath.write_text(markdown, encoding='utf-8')
         return filepath
-    
+
     def _generate_filepath(self, post: Dict) -> Path:
-        """Generate filepath: {url_hash}.md (AI/batch processing optimized)"""
-        url = post.get('source_url') or post.get('url') or post['id']
-        url_hash = hashlib.md5(url.encode()).hexdigest()
-        return self.output_dir / f"{url_hash}.md"
-    
-    def save_index(self, blogger: Dict, posts: List[Dict]):
-        """Save index.json for fast retrieval"""
-        posts_index = [{
-            'id': p['id'],
-            'title': p['title'],
-            'published_at': p['published_at'],
-            'category': p.get('category', ''),
-            'filename': str(self._generate_filepath(p).relative_to(self.output_dir))
-        } for p in posts]
-        
-        index = {'blogger': blogger, 'posts': posts_index, 'total': len(posts)}
-        (self.output_dir / 'index.json').write_text(
-            json.dumps(index, indent=2, ensure_ascii=False), encoding='utf-8')
+        """Generate filepath: {article_id}.md"""
+        article_id = post.get('article_id', 'unknown')
+        filename = f"{article_id}.md"
+
+        return self.output_dir / filename

@@ -10,3 +10,19 @@ temp_*.html
 /tmp/
 .DS_Store
 *.swp
+node_modules
+
+# ── 数据、备份与生成物（体积大，不入库）────────────────────
+# 说明：output/ 已在上面忽略；这里补齐其余大目录，
+# 以免一次提交把 2.1 GB 的 legacy 等推上 GitHub。
+legacy/
+keyword_discovery/
+backup/
+temp/
+graphify-out/
+.pytest_cache/
+.fxz-artifact-staging/
+
+# docx 为二进制生成物，体积大且每次重新生成都会新增整份副本。
+# 需要时用 tools/blog_to_docx.py --all 在本地重建（约 6 秒）。
+docx/

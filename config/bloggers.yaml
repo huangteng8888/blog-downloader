@@ -1,10 +1,46 @@
 # 博主配置
+#
+# ⚠️ 本文件目前只是文档，没有任何代码读取 schedule 字段。
+#    「谁在定期抓」由 Windows 计划任务决定，见 docs/更新状态与同步机制_20261027.md
+#    2026-10-27 实测：仅徐小明仍在更新，其余 3 位已停更。
 bloggers:
   - uid: "1300871220"
     name: "徐小明"
     enabled: true
     schedule:
-      enabled: true
+      enabled: false            # 实际由计划任务 FxzBlogCrawler-DailySync 触发（每日 10:40/14:10/17:50/23:10）
+      interval: "daily"
+      time: "10:40,14:10,17:50,23:10"
+    filters:
+      categories: []
+      exclude_categories: []
+    storage:
+      format: "markdown"
+      include_images: true
+      image_dir: "images"
+    collector: "tools/sync_latest.py"   # 增量同步器（列表页 50 条/页，跨断更期补齐）
+    notes:
+      - "唯一仍在更新的博主：有发文的日子通常 3 篇（直播 + 策略 + 午间短评）"
+      - "时段双峰：11:31-13:15 午间短评（35%）、14-17 时午后主峰（61%）；周六不发、周日发周一策略"
+      - "盘中即时直播由前一交易日下午建帖（标题写次日），当天往同一篇里追加，收盘后才是终稿"
+      - "2026-10-27 已补齐 2026-06-11 ~ 2026-10-26 的 273 篇缺口，共 12782 篇"
+
+  # ── 需特殊列表入口的博主 ──────────────────────────────────────────
+  # 该博客的主页 /u/{uid}、短链 /wu2198 及 /s/articlelist_* 均被博主设置了访问权限，
+  # 未登录访客会被跳转到权限提示页（"你访问的博客设置了访问权限！"）；
+  # 但列表接口 /s/article_sort_{uid}_10001_{page}.html 与正文页 /s/blog_{article_id}.html
+  # 未被拦截，仍可正常抓取（2026-10-10 实测确认）。
+  #
+  # ⚠️ 现有 runner 走 src/spider.js，第 1 页固定抓主页 /u/{uid}，
+  #    对本博客只会拿到 300 字节跳转脚本、解析出 0 篇并提前结束。
+  #    请使用专用采集器（已内置断点续跑，重复运行即为增量同步）：
+  #      python tools/download_wu2198.py --max-runtime 780 --workers 6 --delay 0.6
+  #
+  - uid: "1216826604"
+    name: "wu2198"
+    enabled: true
+    schedule:
+      enabled: false
       interval: "daily"
       time: "02:00"
     filters:
@@ -14,33 +50,27 @@ bloggers:
       format: "markdown"
       include_images: true
       image_dir: "images"
+    list_entry: "article_sort"                    # 列表入口：默认 homepage，本博客必须用 article_sort
+    collector: "tools/download_wu2198.py"         # 专用采集器
+    notes:
+      - "2010 年前后起博客被设为访问权限，主页/列表入口对外不可见"
+      - "2021-01-12 后停更（已确认，源站最新一篇即 2021-01-12）"
+      - "全量 2404 篇（2006-02-09 ~ 2021-01-12）已于 2026-10-10 采集完成，零失败"
+      - "其中 16 篇为纯图片博文，正文文字为空，源站内容即如此"
+      - "历史缺口由 tools/wayback_resume.py 从 archive.org 补抓，与新浪线无关"
+
+  # ── 已停更博主（不需要再抓）──────────────────────────────────────
+  # 2026-10-27 实测：源站最新一篇与本地最新一篇完全一致，无欠账。
+  - uid: "1285707277"
+    name: "股市风云"
+    enabled: false
+    notes:
+      - "最后更新 2022-06-13「大盘将步入箱体运行阶段」，已停更 1597 天"
+      - "本地 7284 篇（2007-03-30 ~ 2022-06-13），完整"
 
   - uid: "1215172700"
     name: "缠中说禅"
-    enabled: true
-    schedule:
-      enabled: false
-      interval: "daily"
-      time: "02:00"
-    filters:
-      categories: []
-      exclude_categories: []
-    storage:
-      format: "markdown"
-      include_images: true
-      image_dir: "images"
-
-  - uid: "1285707277"
-    name: "股市风云"
-    enabled: true
-    schedule:
-      enabled: false
-      interval: "daily"
-      time: "02:00"
-    filters:
-      categories: []
-      exclude_categories: []
-    storage:
-      format: "markdown"
-      include_images: true
-      image_dir: "images"
+    enabled: false
+    notes:
+      - "最后更新 2008-10-05「美国救市，闹剧一场。」，已停更 6596 天"
+      - "本地 907 篇（2006-02-01 ~ 2008-10-05），完整；tags 覆盖 60.5% 系 v1 源数据天生缺失"
